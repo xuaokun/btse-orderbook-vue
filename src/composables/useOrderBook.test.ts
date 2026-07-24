@@ -7,6 +7,7 @@ import {
 } from '../types/orderbook'
 import {
   createOrderBookController,
+  type ReconnectScheduler,
   type OrderBookSocketPort,
 } from './useOrderBook'
 
@@ -27,6 +28,38 @@ class FakeOrderBookSocket implements OrderBookSocketPort {
 
   close(): void {
     this.handlers.onClose?.({} as CloseEvent)
+  }
+}
+
+class FakeReconnectScheduler implements ReconnectScheduler {
+  readonly schedule = vi.fn((callback: () => void, delayMs: number) => {
+    const handle = Symbol('reconnect-timer')
+    this.pending.push({ callback, delayMs, handle })
+    return handle
+  })
+
+  readonly cancel = vi.fn((handle: unknown) => {
+    this.pending = this.pending.filter((timer) => timer.handle !== handle)
+  })
+
+  private pending: Array<{
+    callback: () => void
+    delayMs: number
+    handle: unknown
+  }> = []
+
+  get delays(): number[] {
+    return this.pending.map((timer) => timer.delayMs)
+  }
+
+  runNext(): void {
+    const timer = this.pending.shift()
+
+    if (!timer) {
+      throw new Error('No reconnect timer is pending')
+    }
+
+    timer.callback()
   }
 }
 
@@ -51,10 +84,14 @@ function createMessage(
 
 function setupController() {
   let socket: FakeOrderBookSocket | undefined
-  const controller = createOrderBookController((handlers) => {
-    socket = new FakeOrderBookSocket(handlers)
-    return socket
-  })
+  const scheduler = new FakeReconnectScheduler()
+  const controller = createOrderBookController(
+    (handlers) => {
+      socket = new FakeOrderBookSocket(handlers)
+      return socket
+    },
+    { scheduler },
+  )
 
   if (!socket) {
     throw new Error('Socket service was not created')
@@ -63,6 +100,7 @@ function setupController() {
   return {
     controller,
     socket,
+    scheduler,
   }
 }
 
@@ -213,7 +251,7 @@ describe('createOrderBookController', () => {
   })
 
   it('marks the order book as unsynchronized when the socket closes', () => {
-    const { controller, socket } = setupController()
+    const { controller, socket, scheduler } = setupController()
     controller.connect()
     socket.open()
     socket.emit(createMessage('snapshot'))
@@ -225,5 +263,42 @@ describe('createOrderBookController', () => {
     )
     expect(controller.state.syncStatus).toBe(SyncStatus.Idle)
     expect(controller.state.lastSeqNum).toBeNull()
+    expect(scheduler.delays).toEqual([1_000])
+  })
+
+  it('uses exponential backoff and resets it after a valid snapshot', () => {
+    const { controller, socket, scheduler } = setupController()
+    controller.connect()
+    socket.open()
+
+    socket.close()
+    expect(scheduler.delays).toEqual([1_000])
+
+    scheduler.runNext()
+    expect(socket.connect).toHaveBeenCalledTimes(2)
+    socket.open()
+
+    socket.close()
+    expect(scheduler.delays).toEqual([2_000])
+
+    scheduler.runNext()
+    socket.open()
+    socket.emit(createMessage('snapshot'))
+    socket.close()
+
+    expect(scheduler.delays).toEqual([1_000])
+  })
+
+  it('cancels pending reconnects after an intentional disconnect', () => {
+    const { controller, socket, scheduler } = setupController()
+    controller.connect()
+    socket.open()
+    socket.close()
+
+    controller.disconnect()
+
+    expect(socket.disconnect).toHaveBeenCalledOnce()
+    expect(scheduler.cancel).toHaveBeenCalledOnce()
+    expect(scheduler.delays).toEqual([])
   })
 })

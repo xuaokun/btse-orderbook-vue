@@ -8,6 +8,8 @@ import {
   applyDelta,
   applySnapshot,
   createOrderBookState,
+  isCrossedOrderBook,
+  isSequenceValid,
 } from './orderBook'
 
 function createOrderBookData(
@@ -124,5 +126,77 @@ describe('applyDelta', () => {
     expect(state.bids.has('100')).toBe(false)
     expect(state.bids.get('99')).toBe('3')
     expect(state.lastSeqNum).toBe(103)
+  })
+})
+
+describe('isSequenceValid', () => {
+  it.each([
+    {
+      lastSeqNum: 100,
+      prevSeqNum: 100,
+      expected: true,
+    },
+    {
+      lastSeqNum: 100,
+      prevSeqNum: 99,
+      expected: false,
+    },
+    {
+      lastSeqNum: 100,
+      prevSeqNum: 101,
+      expected: false,
+    },
+    {
+      lastSeqNum: null,
+      prevSeqNum: 100,
+      expected: false,
+    },
+  ])(
+    'returns $expected for lastSeqNum=$lastSeqNum and prevSeqNum=$prevSeqNum',
+    ({ lastSeqNum, prevSeqNum, expected }) => {
+      expect(isSequenceValid(lastSeqNum, prevSeqNum)).toBe(expected)
+    },
+  )
+})
+
+describe('isCrossedOrderBook', () => {
+  it('returns false when the best bid is lower than the best ask', () => {
+    const bids = new Map([
+      ['100', '2'],
+      ['99', '3'],
+    ])
+    const asks = new Map([
+      ['101', '4'],
+      ['102', '5'],
+    ])
+
+    expect(isCrossedOrderBook(bids, asks)).toBe(false)
+  })
+
+  it('returns true when the best bid equals the best ask', () => {
+    const bids = new Map([['101', '2']])
+    const asks = new Map([['101', '3']])
+
+    expect(isCrossedOrderBook(bids, asks)).toBe(true)
+  })
+
+  it('returns true when the best bid is higher than the best ask', () => {
+    const bids = new Map([['102', '2']])
+    const asks = new Map([['101', '3']])
+
+    expect(isCrossedOrderBook(bids, asks)).toBe(true)
+  })
+
+  it.each([
+    {
+      bids: new Map<string, string>(),
+      asks: new Map([['101', '3']]),
+    },
+    {
+      bids: new Map([['100', '2']]),
+      asks: new Map<string, string>(),
+    },
+  ])('returns false when one side is empty', ({ bids, asks }) => {
+    expect(isCrossedOrderBook(bids, asks)).toBe(false)
   })
 })

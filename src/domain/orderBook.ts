@@ -60,3 +60,32 @@ export function applyDelta(
   applyQuoteUpdates(state.asks, delta.asks)
   state.lastSeqNum = delta.seqNum
 }
+
+export function isSequenceValid(
+  lastSeqNum: number | null,
+  prevSeqNum: number,
+): boolean {
+  return lastSeqNum !== null && prevSeqNum === lastSeqNum
+}
+
+export function isCrossedOrderBook(
+  bids: ReadonlyMap<string, string>,
+  asks: ReadonlyMap<string, string>,
+): boolean {
+  if (bids.size === 0 || asks.size === 0) {
+    return false
+  }
+
+  let bestBid = Number.NEGATIVE_INFINITY
+  let bestAsk = Number.POSITIVE_INFINITY
+
+  for (const price of bids.keys()) {
+    bestBid = Math.max(bestBid, Number(price))
+  }
+
+  for (const price of asks.keys()) {
+    bestAsk = Math.min(bestAsk, Number(price))
+  }
+
+  return bestBid >= bestAsk
+}

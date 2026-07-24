@@ -7,6 +7,10 @@ import {
   isSequenceValid,
 } from '../domain/orderBook'
 import {
+  ReconnectBackoff,
+  type ReconnectBackoffOptions,
+} from '../domain/reconnectBackoff'
+import {
   OrderBookSocketService,
   type OrderBookSocketHandlers,
 } from '../services/orderBookSocket'
@@ -27,26 +31,7 @@ export type OrderBookSocketServiceFactory = (
   handlers: OrderBookSocketHandlers,
 ) => OrderBookSocketPort
 
-export const RECONNECT_BASE_DELAY_MS = 1_000
-export const RECONNECT_MAX_DELAY_MS = 30_000
-
-export interface ReconnectScheduler {
-  schedule(callback: () => void, delayMs: number): unknown
-  cancel(handle: unknown): void
-}
-
-export interface OrderBookReconnectOptions {
-  baseDelayMs?: number
-  maxDelayMs?: number
-  scheduler?: ReconnectScheduler
-}
-
-const defaultReconnectScheduler: ReconnectScheduler = {
-  schedule: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-  cancel: (handle) => {
-    globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>)
-  },
-}
+export type OrderBookReconnectOptions = ReconnectBackoffOptions
 
 function createDefaultSocketService(
   handlers: OrderBookSocketHandlers,
@@ -71,26 +56,8 @@ export function createOrderBookController(
   reconnectOptions: OrderBookReconnectOptions = {},
 ) {
   const state = reactive(createOrderBookState()) as OrderBookState
-  const reconnectBaseDelayMs =
-    reconnectOptions.baseDelayMs ?? RECONNECT_BASE_DELAY_MS
-  const reconnectMaxDelayMs =
-    reconnectOptions.maxDelayMs ?? RECONNECT_MAX_DELAY_MS
-  const reconnectScheduler =
-    reconnectOptions.scheduler ?? defaultReconnectScheduler
 
   let socketService: OrderBookSocketPort
-  let reconnectEnabled = false
-  let reconnectAttempt = 0
-  let reconnectTimer: unknown = null
-
-  function clearReconnectTimer(): void {
-    if (reconnectTimer === null) {
-      return
-    }
-
-    reconnectScheduler.cancel(reconnectTimer)
-    reconnectTimer = null
-  }
 
   function openConnection(): void {
     if (state.connectionStatus !== ConnectionStatus.Disconnected) {
@@ -101,25 +68,10 @@ export function createOrderBookController(
     socketService.connect()
   }
 
-  function scheduleReconnect(): void {
-    if (!reconnectEnabled || reconnectTimer !== null) {
-      return
-    }
-
-    const delayMs = Math.min(
-      reconnectBaseDelayMs * 2 ** reconnectAttempt,
-      reconnectMaxDelayMs,
-    )
-    reconnectAttempt += 1
-
-    reconnectTimer = reconnectScheduler.schedule(() => {
-      reconnectTimer = null
-
-      if (reconnectEnabled) {
-        openConnection()
-      }
-    }, delayMs)
-  }
+  const reconnectBackoff = new ReconnectBackoff(
+    openConnection,
+    reconnectOptions,
+  )
 
   function commitOrderBook(candidate: OrderBookState): void {
     replaceMap(state.bids, candidate.bids)
@@ -162,7 +114,7 @@ export function createOrderBookController(
     }
 
     commitOrderBook(candidate)
-    reconnectAttempt = 0
+    reconnectBackoff.reset()
   }
 
   function handleDelta(message: OrderBookMessage): void {
@@ -208,7 +160,7 @@ export function createOrderBookController(
     state.connectionStatus = ConnectionStatus.Disconnected
     state.syncStatus = SyncStatus.Idle
     state.lastSeqNum = null
-    scheduleReconnect()
+    reconnectBackoff.schedule()
   }
 
   socketService = createSocketService({
@@ -218,14 +170,11 @@ export function createOrderBookController(
   })
 
   function connect(): void {
-    reconnectEnabled = true
-    clearReconnectTimer()
-    openConnection()
+    reconnectBackoff.start()
   }
 
   function disconnect(): void {
-    reconnectEnabled = false
-    clearReconnectTimer()
+    reconnectBackoff.stop()
     socketService.disconnect()
     handleClose()
   }

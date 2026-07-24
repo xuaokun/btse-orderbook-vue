@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { ReconnectScheduler } from '../domain/reconnectBackoff'
 import type { OrderBookSocketHandlers } from '../services/orderBookSocket'
 import {
   ConnectionStatus,
@@ -7,7 +8,6 @@ import {
 } from '../types/orderbook'
 import {
   createOrderBookController,
-  type ReconnectScheduler,
   type OrderBookSocketPort,
 } from './useOrderBook'
 

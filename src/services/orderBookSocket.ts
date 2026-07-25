@@ -1,5 +1,6 @@
 import type {
   OrderBookData,
+  OrderBookErrorResponse,
   OrderBookMessage,
   QuoteTuple,
 } from '../types/orderbook'
@@ -25,9 +26,20 @@ export type WebSocketFactory = (url: string) => WebSocketLike
 export interface OrderBookSocketHandlers {
   onOpen?: () => void
   onMessage: (message: OrderBookMessage) => void
+  onProtocolError?: (response: OrderBookErrorResponse) => void
   onError?: (event: Event) => void
   onClose?: (event: CloseEvent) => void
 }
+
+export type OrderBookSocketEvent =
+  | {
+      kind: 'message'
+      message: OrderBookMessage
+    }
+  | {
+      kind: 'error'
+      response: OrderBookErrorResponse
+    }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -60,25 +72,67 @@ function isOrderBookData(value: unknown): value is OrderBookData {
   )
 }
 
-export function parseOrderBookMessage(rawMessage: string): OrderBookMessage | null {
+function isOrderBookErrorResponse(
+  value: unknown,
+): value is OrderBookErrorResponse {
+  if (
+    !isRecord(value) ||
+    value.severity !== 'ERROR' ||
+    !Array.isArray(value.errors) ||
+    value.errors.length === 0
+  ) {
+    return false
+  }
+
+  return value.errors.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.arg === 'string' &&
+      isRecord(item.error) &&
+      typeof item.error.code === 'number' &&
+      typeof item.error.message === 'string',
+  )
+}
+
+export function parseOrderBookSocketEvent(
+  rawMessage: string,
+): OrderBookSocketEvent | null {
   try {
     const value: unknown = JSON.parse(rawMessage)
 
     if (
-      !isRecord(value) ||
-      typeof value.topic !== 'string' ||
-      !isOrderBookData(value.data)
+      isRecord(value) &&
+      typeof value.topic === 'string' &&
+      isOrderBookData(value.data)
     ) {
-      return null
+      return {
+        kind: 'message',
+        message: {
+          topic: value.topic,
+          data: value.data,
+        },
+      }
     }
 
-    return {
-      topic: value.topic,
-      data: value.data,
+    if (isOrderBookErrorResponse(value)) {
+      return {
+        kind: 'error',
+        response: value,
+      }
     }
+
+    return null
   } catch {
     return null
   }
+}
+
+export function parseOrderBookMessage(
+  rawMessage: string,
+): OrderBookMessage | null {
+  const event = parseOrderBookSocketEvent(rawMessage)
+
+  return event?.kind === 'message' ? event.message : null
 }
 
 function createBrowserWebSocket(url: string): WebSocketLike {
@@ -118,10 +172,12 @@ export class OrderBookSocketService {
         return
       }
 
-      const message = parseOrderBookMessage(event.data)
+      const parsedEvent = parseOrderBookSocketEvent(event.data)
 
-      if (message) {
-        this.handlers.onMessage(message)
+      if (parsedEvent?.kind === 'message') {
+        this.handlers.onMessage(parsedEvent.message)
+      } else if (parsedEvent?.kind === 'error') {
+        this.handlers.onProtocolError?.(parsedEvent.response)
       }
     }
 

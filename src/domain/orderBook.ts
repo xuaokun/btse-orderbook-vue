@@ -13,6 +13,7 @@ export function createOrderBookState(): OrderBookState {
     lastSeqNum: null,
     connectionStatus: ConnectionStatus.Disconnected,
     syncStatus: SyncStatus.Idle,
+    streamError: null,
   }
 }
 
@@ -50,6 +51,7 @@ export function applySnapshot(
   replaceQuotes(state.asks, snapshot.asks)
   state.lastSeqNum = snapshot.seqNum
   state.syncStatus = SyncStatus.Synced
+  state.streamError = null
 }
 
 export function applyDelta(

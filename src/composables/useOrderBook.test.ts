@@ -5,6 +5,7 @@ import type { OrderBookSocketHandlers } from '../services/orderBookSocket'
 import {
   ConnectionStatus,
   SyncStatus,
+  type OrderBookErrorResponse,
   type OrderBookMessage,
 } from '../types/orderbook'
 import {
@@ -25,6 +26,10 @@ class FakeOrderBookSocket implements OrderBookSocketPort {
 
   emit(message: OrderBookMessage): void {
     this.handlers.onMessage(message)
+  }
+
+  emitProtocolError(response: OrderBookErrorResponse): void {
+    this.handlers.onProtocolError?.(response)
   }
 
   close(): void {
@@ -80,6 +85,21 @@ function createMessage(
       symbol: 'BTCPFC',
       ...overrides,
     },
+  }
+}
+
+function createProtocolError(code: number): OrderBookErrorResponse {
+  return {
+    severity: 'ERROR',
+    errors: [
+      {
+        arg: 'update:BTCPFC',
+        error: {
+          code,
+          message: `Protocol error ${code}`,
+        },
+      },
+    ],
   }
 }
 
@@ -386,6 +406,68 @@ describe('createOrderBookController', () => {
     expect(controller.state.syncStatus).toBe(SyncStatus.Idle)
     expect(controller.state.lastSeqNum).toBeNull()
     expect(scheduler.delays).toEqual([1_000])
+  })
+
+  it('stops reconnecting after a non-retryable protocol error', () => {
+    const { controller, socket, scheduler } = setupController()
+    controller.connect()
+    socket.open()
+    socket.emit(createMessage('snapshot'))
+
+    socket.emitProtocolError(createProtocolError(1005))
+    socket.emit(
+      createMessage('delta', {
+        bids: [['100', '9']],
+        seqNum: 101,
+        prevSeqNum: 100,
+      }),
+    )
+
+    expect(socket.disconnect).toHaveBeenCalledOnce()
+    expect(controller.state.connectionStatus).toBe(
+      ConnectionStatus.Disconnected,
+    )
+    expect(controller.state.syncStatus).toBe(SyncStatus.Failed)
+    expect(controller.state.lastSeqNum).toBeNull()
+    expect(controller.state.bids.get('100')).toBe('2')
+    expect(controller.state.streamError).toEqual({
+      arg: 'update:BTCPFC',
+      code: 1005,
+      message: 'Protocol error 1005',
+    })
+    expect(scheduler.delays).toEqual([])
+  })
+
+  it('reconnects with backoff after a retryable protocol error', () => {
+    const { controller, socket, scheduler } = setupController()
+    controller.connect()
+    socket.open()
+    socket.emit(createMessage('snapshot'))
+
+    socket.emitProtocolError(createProtocolError(1007))
+    socket.close()
+
+    expect(socket.disconnect).toHaveBeenCalledOnce()
+    expect(controller.state.connectionStatus).toBe(
+      ConnectionStatus.Disconnected,
+    )
+    expect(controller.state.syncStatus).toBe(SyncStatus.Idle)
+    expect(controller.state.lastSeqNum).toBeNull()
+    expect(controller.state.streamError?.code).toBe(1007)
+    expect(scheduler.delays).toEqual([1_000])
+
+    scheduler.runNext()
+    socket.open()
+    socket.emit(
+      createMessage('snapshot', {
+        seqNum: 200,
+        prevSeqNum: 199,
+      }),
+    )
+
+    expect(socket.connect).toHaveBeenCalledTimes(2)
+    expect(controller.state.syncStatus).toBe(SyncStatus.Synced)
+    expect(controller.state.streamError).toBeNull()
   })
 
   it('uses exponential backoff and resets it after a valid snapshot', () => {

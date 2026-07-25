@@ -9,6 +9,7 @@ export enum SyncStatus {
   WaitingSnapshot = 'waiting-snapshot',
   Synced = 'synced',
   Resyncing = 'resyncing',
+  Failed = 'failed',
 }
 
 export type QuoteTuple = [price: string, size: string]
@@ -28,10 +29,30 @@ export interface OrderBookMessage {
   data: OrderBookData
 }
 
+export interface OrderBookErrorDetail {
+  code: number
+  message: string
+}
+
+export interface OrderBookErrorItem {
+  arg: string
+  error: OrderBookErrorDetail
+}
+
+export interface OrderBookErrorResponse {
+  severity: 'ERROR'
+  errors: OrderBookErrorItem[]
+}
+
+export interface OrderBookStreamError extends OrderBookErrorDetail {
+  arg: string
+}
+
 export interface OrderBookState {
   bids: Map<string, string>
   asks: Map<string, string>
   lastSeqNum: number | null
   connectionStatus: ConnectionStatus
   syncStatus: SyncStatus
+  streamError: OrderBookStreamError | null
 }

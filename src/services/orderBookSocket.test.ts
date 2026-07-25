@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { OrderBookMessage } from '../types/orderbook'
+import type {
+  OrderBookErrorResponse,
+  OrderBookMessage,
+} from '../types/orderbook'
 import {
   ORDER_BOOK_ENDPOINT,
   ORDER_BOOK_TOPIC,
   OrderBookSocketService,
   parseOrderBookMessage,
+  parseOrderBookSocketEvent,
   type WebSocketLike,
 } from './orderBookSocket'
 
@@ -53,6 +57,23 @@ function createMessage(
   }
 }
 
+function createErrorResponse(
+  code = 1000,
+): OrderBookErrorResponse {
+  return {
+    severity: 'ERROR',
+    errors: [
+      {
+        arg: 'update:INVALID_MARKET',
+        error: {
+          code,
+          message: 'Market pair provided is currently not supported.',
+        },
+      },
+    ],
+  }
+}
+
 describe('parseOrderBookMessage', () => {
   it('parses a valid order book message', () => {
     const message = createMessage()
@@ -69,6 +90,41 @@ describe('parseOrderBookMessage', () => {
     }),
   ])('returns null for an unsupported message', (rawMessage) => {
     expect(parseOrderBookMessage(rawMessage)).toBeNull()
+  })
+})
+
+describe('parseOrderBookSocketEvent', () => {
+  it('parses the documented order book error response', () => {
+    const response = createErrorResponse()
+
+    expect(parseOrderBookSocketEvent(JSON.stringify(response))).toEqual({
+      kind: 'error',
+      response,
+    })
+    expect(parseOrderBookMessage(JSON.stringify(response))).toBeNull()
+  })
+
+  it.each([
+    {
+      severity: 'ERROR',
+      errors: [],
+    },
+    {
+      severity: 'ERROR',
+      errors: [
+        {
+          arg: 'update:INVALID_MARKET',
+          error: {
+            code: '1000',
+            message: 'Invalid code type',
+          },
+        },
+      ],
+    },
+  ])('rejects a malformed error response', (response) => {
+    expect(
+      parseOrderBookSocketEvent(JSON.stringify(response)),
+    ).toBeNull()
   })
 })
 
@@ -119,6 +175,28 @@ describe('OrderBookSocketService', () => {
 
     expect(onMessage).toHaveBeenCalledOnce()
     expect(onMessage).toHaveBeenCalledWith(message)
+  })
+
+  it('forwards protocol error responses separately from order book data', () => {
+    const socket = new MockWebSocket()
+    const onMessage = vi.fn()
+    const onProtocolError = vi.fn()
+    const service = new OrderBookSocketService(
+      {
+        onMessage,
+        onProtocolError,
+      },
+      () => socket,
+    )
+    const response = createErrorResponse()
+
+    service.connect()
+    socket.open()
+    socket.emitMessage(JSON.stringify(response))
+
+    expect(onProtocolError).toHaveBeenCalledOnce()
+    expect(onProtocolError).toHaveBeenCalledWith(response)
+    expect(onMessage).not.toHaveBeenCalled()
   })
 
   it('re-subscribes on the existing open connection', () => {

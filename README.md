@@ -14,6 +14,8 @@ WebSocket messages, while displaying the best eight buy and sell levels.
 - Applies incremental order book updates in sequence
 - Re-subscribes for a new snapshot when a sequence gap is detected
 - Recovers from a crossed order book without reconnecting the WebSocket
+- Classifies OSS protocol errors to avoid unnecessary retry loops
+- Surfaces loading, reconnection, re-synchronization, and terminal error states
 - Displays the best eight buy and sell quotes
 - Calculates cumulative quote totals and depth percentages
 - Formats numeric values with thousands separators
@@ -67,6 +69,8 @@ The tests cover:
 - Sequence validation
 - Crossed order book detection
 - Re-subscription and reconnect behavior
+- Retryable and non-retryable OSS protocol errors
+- User-facing order book status selection
 - Visible quote selection and cumulative totals
 - Last-price parsing and direction
 - Quote animation detection, revisions, and cleanup

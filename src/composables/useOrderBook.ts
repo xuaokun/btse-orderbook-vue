@@ -17,10 +17,13 @@ import {
 import {
   ConnectionStatus,
   SyncStatus,
+  type OrderBookErrorResponse,
   type OrderBookMessage,
   type OrderBookState,
 } from '../types/orderbook'
 import { useQuoteAnimations } from './useQuoteAnimations'
+
+const RETRYABLE_PROTOCOL_ERROR_CODES = new Set([1007, 1008])
 
 export interface OrderBookSocketPort {
   connect(): void
@@ -85,6 +88,7 @@ export function createOrderBookController(
     replaceMap(state.asks, candidate.asks)
     state.lastSeqNum = candidate.lastSeqNum
     state.syncStatus = SyncStatus.Synced
+    state.streamError = null
   }
 
   function createCandidate(): OrderBookState {
@@ -94,6 +98,7 @@ export function createOrderBookController(
       lastSeqNum: state.lastSeqNum,
       connectionStatus: state.connectionStatus,
       syncStatus: state.syncStatus,
+      streamError: state.streamError,
     }
   }
 
@@ -169,15 +174,51 @@ export function createOrderBookController(
 
   function handleClose(): void {
     state.connectionStatus = ConnectionStatus.Disconnected
-    state.syncStatus = SyncStatus.Idle
     state.lastSeqNum = null
     clearAnimations()
+
+    if (state.syncStatus === SyncStatus.Failed) {
+      return
+    }
+
+    state.syncStatus = SyncStatus.Idle
     reconnectBackoff.schedule()
+  }
+
+  function handleProtocolError(response: OrderBookErrorResponse): void {
+    const firstError = response.errors[0]
+
+    if (!firstError) {
+      return
+    }
+
+    state.streamError = {
+      arg: firstError.arg,
+      code: firstError.error.code,
+      message: firstError.error.message,
+    }
+    state.lastSeqNum = null
+    clearAnimations()
+
+    const isRetryable = response.errors.every(({ error }) =>
+      RETRYABLE_PROTOCOL_ERROR_CODES.has(error.code),
+    )
+
+    if (!isRetryable) {
+      state.syncStatus = SyncStatus.Failed
+      reconnectBackoff.stop()
+    } else {
+      state.syncStatus = SyncStatus.Idle
+    }
+
+    socketService.disconnect()
+    handleClose()
   }
 
   socketService = createSocketService({
     onOpen: handleOpen,
     onMessage: handleMessage,
+    onProtocolError: handleProtocolError,
     onClose: handleClose,
   })
 

@@ -4,6 +4,7 @@ import { useLastPrice } from '../composables/useLastPrice'
 import { useOrderBook } from '../composables/useOrderBook'
 import { buildVisibleOrderBook } from '../domain/orderBookView'
 import LastPrice from './LastPrice.vue'
+import OrderBookStatus from './OrderBookStatus.vue'
 import QuoteTable from './QuoteTable.vue'
 
 const {
@@ -23,28 +24,39 @@ const visibleOrderBook = computed(() =>
       <h1 id="order-book-title">Order Book</h1>
     </header>
 
-    <QuoteTable
-      :rows="visibleOrderBook.asks"
-      :animations="orderBookAnimations.asks"
-      side="sell"
-      show-header
-    />
+    <div class="order-book__content">
+      <QuoteTable
+        :rows="visibleOrderBook.asks"
+        :animations="orderBookAnimations.asks"
+        side="sell"
+        show-header
+      />
 
-    <LastPrice
-      :price="lastPriceState.currentPrice"
-      :direction="lastPriceState.direction"
-    />
+      <LastPrice
+        :price="lastPriceState.currentPrice"
+        :direction="lastPriceState.direction"
+      />
 
-    <QuoteTable
-      :rows="visibleOrderBook.bids"
-      :animations="orderBookAnimations.bids"
-      side="buy"
+      <QuoteTable
+        :rows="visibleOrderBook.bids"
+        :animations="orderBookAnimations.bids"
+        side="buy"
+      />
+    </div>
+
+    <OrderBookStatus
+      :sync-status="orderBookState.syncStatus"
+      :has-cached-quotes="
+        orderBookState.bids.size > 0 || orderBookState.asks.size > 0
+      "
+      :stream-error="orderBookState.streamError"
     />
   </main>
 </template>
 
 <style scoped lang="less">
 .order-book {
+  position: relative;
   width: min(466px, 100%);
   overflow: hidden;
   border-radius: 5px;
@@ -66,6 +78,10 @@ const visibleOrderBook = computed(() =>
       line-height: 1;
       letter-spacing: 0.2px;
     }
+  }
+
+  &__content {
+    min-height: 240px;
   }
 
   @media (max-width: 520px) {

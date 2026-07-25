@@ -36,6 +36,7 @@ describe('createOrderBookState', () => {
     expect(state.lastSeqNum).toBeNull()
     expect(state.connectionStatus).toBe(ConnectionStatus.Disconnected)
     expect(state.syncStatus).toBe(SyncStatus.Idle)
+    expect(state.streamError).toBeNull()
   })
 })
 

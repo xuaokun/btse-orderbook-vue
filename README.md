@@ -4,6 +4,10 @@ A real-time BTCPFC order book built with Vue 3 and TypeScript. The application
 maintains a synchronized local order book from BTSE snapshot and incremental
 WebSocket messages, while displaying the best eight buy and sell levels.
 
+## Live Demo
+
+[View the deployed application on Vercel](https://btse-orderbook-vue.vercel.app/)
+
 ## Features
 
 - Maintains the complete 50-level snapshot locally

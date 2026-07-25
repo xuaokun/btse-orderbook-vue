@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ReconnectScheduler } from '../domain/reconnectBackoff'
+import { QuoteAnimationKind } from '../domain/quoteAnimation'
 import type { OrderBookSocketHandlers } from '../services/orderBookSocket'
 import {
   ConnectionStatus,
@@ -161,6 +162,127 @@ describe('createOrderBookController', () => {
     ])
     expect([...controller.state.asks.entries()]).toEqual([['102', '5']])
     expect(controller.state.lastSeqNum).toBe(101)
+  })
+
+  it('publishes row and size animations for accepted deltas', () => {
+    const { controller, socket } = setupController()
+    controller.connect()
+    socket.open()
+    socket.emit(createMessage('snapshot'))
+
+    expect(controller.animations.bids.size).toBe(0)
+    expect(controller.animations.asks.size).toBe(0)
+
+    socket.emit(
+      createMessage('delta', {
+        bids: [
+          ['100', '4'],
+          ['99', '1'],
+        ],
+        asks: [
+          ['101', '2'],
+          ['102', '5'],
+        ],
+        seqNum: 101,
+        prevSeqNum: 100,
+      }),
+    )
+
+    expect(controller.animations.bids.get('100')?.kind).toBe(
+      QuoteAnimationKind.SizeIncrease,
+    )
+    expect(controller.animations.bids.get('99')?.kind).toBe(
+      QuoteAnimationKind.NewQuote,
+    )
+    expect(controller.animations.asks.get('101')?.kind).toBe(
+      QuoteAnimationKind.SizeDecrease,
+    )
+    expect(controller.animations.asks.get('102')?.kind).toBe(
+      QuoteAnimationKind.NewQuote,
+    )
+  })
+
+  it('does not publish an animation for deleted quotes', () => {
+    const { controller, socket } = setupController()
+    controller.connect()
+    socket.open()
+    socket.emit(createMessage('snapshot'))
+
+    socket.emit(
+      createMessage('delta', {
+        bids: [],
+        asks: [['101', '0']],
+        seqNum: 101,
+        prevSeqNum: 100,
+      }),
+    )
+
+    expect(controller.animations.asks.has('101')).toBe(false)
+  })
+
+  it('uses a new revision for rapid updates to the same quote', () => {
+    const { controller, socket } = setupController()
+    controller.connect()
+    socket.open()
+    socket.emit(createMessage('snapshot'))
+
+    socket.emit(
+      createMessage('delta', {
+        bids: [['100', '4']],
+        asks: [],
+        seqNum: 101,
+        prevSeqNum: 100,
+      }),
+    )
+
+    const firstRevision =
+      controller.animations.bids.get('100')?.revision
+
+    socket.emit(
+      createMessage('delta', {
+        bids: [['100', '1']],
+        asks: [],
+        seqNum: 102,
+        prevSeqNum: 101,
+      }),
+    )
+
+    const latestAnimation = controller.animations.bids.get('100')
+
+    expect(latestAnimation?.revision).toBeGreaterThan(
+      firstRevision ?? 0,
+    )
+    expect(latestAnimation?.kind).toBe(
+      QuoteAnimationKind.SizeDecrease,
+    )
+  })
+
+  it('clears completed animations after their display duration', () => {
+    vi.useFakeTimers()
+
+    try {
+      const { controller, socket } = setupController()
+      controller.connect()
+      socket.open()
+      socket.emit(createMessage('snapshot'))
+
+      socket.emit(
+        createMessage('delta', {
+          bids: [['100', '4']],
+          asks: [],
+          seqNum: 101,
+          prevSeqNum: 100,
+        }),
+      )
+
+      expect(controller.animations.bids.has('100')).toBe(true)
+
+      vi.advanceTimersByTime(500)
+
+      expect(controller.animations.bids.has('100')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('re-subscribes once and ignores deltas after a sequence gap', () => {

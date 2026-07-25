@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { QuoteRow as QuoteRowData } from '../domain/orderBookView'
+import type { QuoteAnimation } from '../domain/quoteAnimation'
 import QuoteRow from './QuoteRow.vue'
 
 defineProps<{
   rows: QuoteRowData[]
+  animations: ReadonlyMap<string, QuoteAnimation>
   side: 'buy' | 'sell'
   showHeader?: boolean
 }>()
@@ -27,6 +29,7 @@ defineProps<{
         v-for="quote in rows"
         :key="quote.price"
         :quote="quote"
+        :animation="animations.get(quote.price)"
         :side="side"
       />
     </div>

@@ -6,7 +6,10 @@ import { buildVisibleOrderBook } from '../domain/orderBookView'
 import LastPrice from './LastPrice.vue'
 import QuoteTable from './QuoteTable.vue'
 
-const { state: orderBookState } = useOrderBook()
+const {
+  state: orderBookState,
+  animations: orderBookAnimations,
+} = useOrderBook()
 const { state: lastPriceState } = useLastPrice()
 
 const visibleOrderBook = computed(() =>
@@ -22,6 +25,7 @@ const visibleOrderBook = computed(() =>
 
     <QuoteTable
       :rows="visibleOrderBook.asks"
+      :animations="orderBookAnimations.asks"
       side="sell"
       show-header
     />
@@ -31,7 +35,11 @@ const visibleOrderBook = computed(() =>
       :direction="lastPriceState.direction"
     />
 
-    <QuoteTable :rows="visibleOrderBook.bids" side="buy"/>
+    <QuoteTable
+      :rows="visibleOrderBook.bids"
+      :animations="orderBookAnimations.bids"
+      side="buy"
+    />
   </main>
 </template>
 

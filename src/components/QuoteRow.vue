@@ -2,17 +2,35 @@
 import { computed } from 'vue'
 import { formatNumber } from '../domain/formatNumber'
 import type { QuoteRow } from '../domain/orderBookView'
+import {
+  QuoteAnimationKind,
+  type QuoteAnimation,
+} from '../domain/quoteAnimation'
 
 const props = defineProps<{
   quote: QuoteRow
+  animation?: QuoteAnimation
   side: 'buy' | 'sell'
 }>()
 
 const depthWidth = computed(() => `${props.quote.depthPercentage}%`)
+
+const isSizeAnimation = computed(
+  () =>
+    props.animation?.kind === QuoteAnimationKind.SizeIncrease ||
+    props.animation?.kind === QuoteAnimationKind.SizeDecrease,
+)
 </script>
 
 <template>
   <div class="quote-row" role="row">
+    <span
+      v-if="animation?.kind === QuoteAnimationKind.NewQuote"
+      :key="animation.revision"
+      class="quote-row__highlight"
+      :class="`quote-row__highlight--${side}`"
+      aria-hidden="true"
+    />
     <span
       class="quote-row__cell quote-row__price"
       :class="`quote-row__price--${side}`"
@@ -20,8 +38,22 @@ const depthWidth = computed(() => `${props.quote.depthPercentage}%`)
     >
       {{ formatNumber(quote.price, 1) }}
     </span>
-    <span class="quote-row__cell" role="cell">
-      {{ formatNumber(quote.size) }}
+    <span class="quote-row__cell quote-row__size" role="cell">
+      <span
+        v-if="animation && isSizeAnimation"
+        :key="animation.revision"
+        class="quote-row__size-highlight"
+        :class="{
+          'quote-row__size-highlight--increase':
+            animation.kind === QuoteAnimationKind.SizeIncrease,
+          'quote-row__size-highlight--decrease':
+            animation.kind === QuoteAnimationKind.SizeDecrease,
+        }"
+        aria-hidden="true"
+      />
+      <span class="quote-row__size-value">
+        {{ formatNumber(quote.size) }}
+      </span>
     </span>
     <span class="quote-row__cell quote-row__total" role="cell">
       <span
@@ -57,6 +89,26 @@ const depthWidth = computed(() => `${props.quote.depthPercentage}%`)
     background: var(--hover);
   }
 
+  &__highlight,
+  &__size-highlight {
+    pointer-events: none;
+    animation: quote-highlight 500ms ease-out forwards;
+  }
+
+  &__highlight {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+
+    &--buy {
+      background: var(--flash-green);
+    }
+
+    &--sell {
+      background: var(--flash-red);
+    }
+  }
+
   &__depth {
     position: absolute;
     z-index: 0;
@@ -76,13 +128,39 @@ const depthWidth = computed(() => `${props.quote.depthPercentage}%`)
   }
 
   &__cell {
+    position: relative;
+    z-index: 2;
     height: 100%;
     display: flex;
     align-items: center;
+  }
 
-    &:not(:first-of-type) {
-      justify-content: flex-end;
+  &__size,
+  &__total {
+    justify-content: flex-end;
+  }
+
+  &__size-highlight {
+    position: absolute;
+    z-index: 0;
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: 86%;
+    transform: translateY(-50%);
+
+    &--increase {
+      background: var(--flash-green);
     }
+
+    &--decrease {
+      background: var(--flash-red);
+    }
+  }
+
+  &__size-value {
+    position: relative;
+    z-index: 1;
   }
 
   &__price {
@@ -110,6 +188,21 @@ const depthWidth = computed(() => `${props.quote.depthPercentage}%`)
 
   @media (prefers-reduced-motion: reduce) {
     transition-duration: 0.01ms;
+
+    &__highlight,
+    &__size-highlight {
+      animation-duration: 0.01ms;
+    }
+  }
+}
+
+@keyframes quote-highlight {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
   }
 }
 </style>

@@ -20,6 +20,7 @@ import {
   type OrderBookMessage,
   type OrderBookState,
 } from '../types/orderbook'
+import { useQuoteAnimations } from './useQuoteAnimations'
 
 export interface OrderBookSocketPort {
   connect(): void
@@ -56,6 +57,12 @@ export function createOrderBookController(
   reconnectOptions: OrderBookReconnectOptions = {},
 ) {
   const state = reactive(createOrderBookState()) as OrderBookState
+  const {
+    animations,
+    clearAnimations,
+    collectDeltaAnimations,
+    publishDeltaAnimations,
+  } = useQuoteAnimations(state)
 
   let socketService: OrderBookSocketPort
 
@@ -97,6 +104,7 @@ export function createOrderBookController(
 
     state.syncStatus = SyncStatus.Resyncing
     state.lastSeqNum = null
+    clearAnimations()
 
     if (!socketService.resubscribe()) {
       socketService.disconnect()
@@ -113,6 +121,7 @@ export function createOrderBookController(
       return
     }
 
+    clearAnimations()
     commitOrderBook(candidate)
     reconnectBackoff.reset()
   }
@@ -135,7 +144,9 @@ export function createOrderBookController(
       return
     }
 
+    const pendingAnimations = collectDeltaAnimations(message)
     commitOrderBook(candidate)
+    publishDeltaAnimations(message, pendingAnimations)
   }
 
   function handleMessage(message: OrderBookMessage): void {
@@ -160,6 +171,7 @@ export function createOrderBookController(
     state.connectionStatus = ConnectionStatus.Disconnected
     state.syncStatus = SyncStatus.Idle
     state.lastSeqNum = null
+    clearAnimations()
     reconnectBackoff.schedule()
   }
 
@@ -181,6 +193,7 @@ export function createOrderBookController(
 
   return {
     state,
+    animations,
     connect,
     disconnect,
   }
@@ -194,5 +207,6 @@ export function useOrderBook() {
 
   return {
     state: readonly(controller.state),
+    animations: readonly(controller.animations),
   }
 }
